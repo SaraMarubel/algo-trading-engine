@@ -251,3 +251,187 @@ html, body {
   font-size: 11px;
   padding: 14px;
 }
+
+/* ---------- Market clock ---------- */
+.market-clock {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-alt);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.market-badge {
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+.market-badge.open { color: var(--green); background: rgba(38, 214, 127, 0.14); }
+.market-badge.closed { color: var(--red); background: rgba(255, 77, 94, 0.14); }
+.market-badge.pre, .market-badge.after { color: var(--amber); background: rgba(255, 180, 84, 0.14); }
+.market-time { color: var(--text); }
+.market-countdown { color: var(--text-dim); }
+
+/* ---------- Algo pill (chart header) ---------- */
+.algo-pill {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.algo-pill.on { color: var(--green); border-color: rgba(38, 214, 127, 0.4); background: rgba(38, 214, 127, 0.1); }
+
+.panel-hint { font-size: 10.5px; color: var(--text-dim); }
+
+/* ---------- Command row (TWAP) ---------- */
+.command-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.command { display: flex; align-items: center; gap: 6px; }
+.command-suffix { font-size: 10.5px; color: var(--text-dim); }
+.qty-input.wide { width: 68px; }
+
+.info-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 10px;
+  cursor: help;
+}
+.info-dot:hover { color: var(--blue); border-color: var(--blue); }
+
+/* ---------- Ticker card: click-to-select + algo toggle ---------- */
+.ticker-card { cursor: pointer; transition: border-color 0.15s ease; }
+.ticker-card:hover { border-color: var(--blue); }
+.ticker-card.selected { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue) inset; }
+
+.algo-toggle {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-align: center;
+  padding: 3px 0;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.algo-toggle.on { color: var(--green); border-color: rgba(38, 214, 127, 0.4); background: rgba(38, 214, 127, 0.1); }
+
+/* ---------- Hover tooltip (shared) ---------- */
+.tooltip {
+  position: fixed;
+  z-index: 100;
+  max-width: 280px;
+  padding: 8px 10px;
+  background: #050709;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.tooltip.visible { opacity: 1; }
+.blotter-table tbody tr { cursor: help; }
+.blotter-table tbody tr:hover { background: var(--panel-alt); }
+
+/* ---------- Settings modal ---------- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(4, 6, 10, 0.72);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.modal-overlay.visible { display: flex; }
+.modal {
+  width: 100%;
+  max-width: 620px;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 700;
+  font-size: 14px;
+}
+.modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+}
+.modal-close:hover { color: var(--red); }
+.modal-body { padding: 16px 18px; overflow-y: auto; }
+.modal-section { margin-bottom: 20px; }
+.modal-section h3 { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); margin: 0 0 10px; }
+.modal-section p { font-size: 12.5px; line-height: 1.6; margin: 8px 0; }
+.modal-section ul { margin: 8px 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; }
+.modal-section li { font-size: 12.5px; line-height: 1.6; }
+.param-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 16px;
+}
+.param-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.param-grid input {
+  font-family: var(--mono);
+  font-size: 13px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 5px;
+  padding: 6px 8px;
+}
+.param-note { font-size: 11px; color: var(--text-dim); margin-top: 10px; }
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 700px) {
+  .param-grid { grid-template-columns: 1fr; }
+}

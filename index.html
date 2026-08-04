@@ -34,11 +34,19 @@
     </div>
   </div>
 
+  <div class="market-clock" id="marketClock" title="Real current NYSE session status">
+    <span class="market-badge" id="marketBadge">—</span>
+    <span class="market-time" id="marketTime">--:--:-- ET</span>
+    <span class="market-countdown" id="marketCountdown">—</span>
+  </div>
+
   <div class="algo-controls">
+    <button id="modeToggle" class="btn btn-outline btn-sm" title="Demo mode keeps the algorithm trading around the clock so this dashboard is always live. Live mode makes it strictly obey real NYSE hours, like a real desk would.">Mode: Demo</button>
     <span class="algo-status" id="algoStatus">
       <span class="pulse-dot"></span> ALGO RUNNING
     </span>
     <button id="toggleAlgo" class="btn btn-outline">Pause Algo</button>
+    <button id="settingsBtn" class="btn" title="Strategy parameters &amp; how the algorithm decides">⚙ Strategy Settings</button>
     <button id="resetAccount" class="btn btn-danger">Reset</button>
   </div>
 </header>
@@ -48,26 +56,46 @@
   <section class="chart-panel">
     <div class="panel-head">
       <div class="panel-title">
-        <span class="ticker-symbol">MSFT</span>
-        <span class="ticker-name">Microsoft Corp.</span>
-        <span class="ticker-price" id="msftPrice">$0.00</span>
-        <span class="ticker-change" id="msftChange">0.00%</span>
+        <span class="ticker-symbol" id="selSymbol">MSFT</span>
+        <span class="ticker-name" id="selName">Microsoft Corp.</span>
+        <span class="ticker-price" id="selPrice">$0.00</span>
+        <span class="ticker-change" id="selChange">0.00%</span>
+        <span class="algo-pill" id="selAlgoPill">ALGO ON</span>
       </div>
       <div class="legend">
-        <span class="legend-item"><i class="swatch sma-fast"></i>SMA 9</span>
-        <span class="legend-item"><i class="swatch sma-slow"></i>SMA 21</span>
-        <span class="legend-item rsi-value">RSI(14): <b id="rsiValue">--</b></span>
+        <span class="legend-item"><i class="swatch sma-fast"></i>SMA <span id="legendFast">9</span></span>
+        <span class="legend-item"><i class="swatch sma-slow"></i>SMA <span id="legendSlow">21</span></span>
+        <span class="legend-item rsi-value">RSI(<span id="legendRsiPeriod">14</span>): <b id="rsiValue">--</b></span>
       </div>
     </div>
     <div id="chart" class="chart"></div>
-    <div class="strategy-note">
-      Strategy: <b>SMA(9/21) crossover</b> with RSI filter, <b>-3% stop-loss</b> and <b>+5% take-profit</b>. Position size: 20% of available cash per entry. Auto-trades MSFT only — all data below is simulated for paper trading, not a live feed.
+
+    <div class="command-row">
+      <div class="command">
+        <button id="twapDumpBtn" class="btn btn-sell btn-sm">Dump Position (TWAP)</button>
+        <input type="number" id="twapDumpPct" class="qty-input" min="1" max="100" value="100" title="% of current position to sell" />
+        <span class="command-suffix">% of position</span>
+        <span class="info-dot"
+          data-tooltip="TWAP = Time-Weighted Average Price execution. Instead of dumping the whole position in one market order (which can move the price against you as you eat through the order book — 'market impact' / slippage), the order is sliced into equal pieces executed at regular intervals so the average fill price tracks the prevailing market price over that window rather than crashing through it.">ⓘ</span>
+      </div>
+      <div class="command">
+        <button id="twapBuyBtn" class="btn btn-buy btn-sm">Accumulate (TWAP)</button>
+        <input type="number" id="twapBuyAmount" class="qty-input wide" min="100" step="100" value="5000" title="Dollar amount to deploy" />
+        <span class="command-suffix">$ to deploy</span>
+        <span class="info-dot"
+          data-tooltip="Same TWAP logic in reverse: builds a large position gradually with smaller buy orders spread over time instead of one block buy, so you don't chase the price up against your own order.">ⓘ</span>
+      </div>
+    </div>
+
+    <div class="strategy-note" id="strategyNote">
+      Strategy: SMA crossover with RSI filter, stop-loss and take-profit. Click any ticker in the portfolio panel to view its chart — toggle its Algo switch to let the strategy trade it too.
     </div>
   </section>
 
   <section class="portfolio-panel">
     <div class="panel-head">
       <div class="panel-title-plain">Tech Portfolio</div>
+      <span class="panel-hint">Click a ticker to view its chart</span>
     </div>
     <div class="ticker-grid" id="tickerGrid"></div>
   </section>
@@ -100,8 +128,54 @@
 </main>
 
 <footer class="footer">
-  Simulated prices &amp; paper trades only. No real market data, brokerage, or funds are involved.
+  Simulated prices &amp; paper trades only. No real market data, brokerage, or funds are involved. NYSE clock reflects real time; trading activity is simulated.
 </footer>
+
+<div class="tooltip" id="hoverTooltip"></div>
+
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal">
+    <div class="modal-head">
+      <span>Strategy Settings</span>
+      <button class="modal-close" id="settingsClose">✕</button>
+    </div>
+    <div class="modal-body">
+      <section class="modal-section">
+        <h3>How the algorithm decides</h3>
+        <p>This trader combines three widely-used technical-analysis building blocks:</p>
+        <ul>
+          <li><b>Moving average crossover.</b> When the fast SMA rises above the slow SMA (a "golden cross"), it's a standard momentum signal that short-term price action has turned bullish relative to the intermediate trend; the reverse ("death cross") signals bearish momentum. A 9/21 pairing is a faster variant of the classic 50/200-day golden/death cross used for longer-term signals.</li>
+          <li><b>RSI filter (Wilder, 1978).</b> The Relative Strength Index measures the speed and magnitude of recent price moves over a lookback period (14 by default). Readings above 70 are conventionally "overbought," below 30 "oversold." Used here to avoid buying into an already-extended move, and to help trigger profit-taking.</li>
+          <li><b>Fixed-fractional position sizing with a stop-loss / take-profit bracket.</b> Each entry risks a fixed % of available cash (scales with account size rather than a flat share count), and every position carries a symmetric-ish risk bracket that exits automatically if price moves against or in favor of the trade by a set %.</li>
+          <li><b>Re-entry cooldown.</b> After an exit, the algorithm won't open a new position in the same ticker for a set number of seconds — a simple form of the hysteresis real systematic strategies use to avoid "overtrading" (repeatedly flipping a position on noise and paying the spread/slippage each time).</li>
+        </ul>
+        <p>Large manual orders use a separate concept — <b>TWAP execution</b> — which slices an order over time instead of routing it all at once, to reduce market impact. See the ⓘ next to the Dump/Accumulate buttons.</p>
+      </section>
+
+      <section class="modal-section">
+        <h3>Parameters</h3>
+        <div class="param-grid">
+          <label>Fast SMA period <input type="number" id="paramSmaFast" min="2" max="50" /></label>
+          <label>Slow SMA period <input type="number" id="paramSmaSlow" min="3" max="200" /></label>
+          <label>RSI period <input type="number" id="paramRsiPeriod" min="2" max="50" /></label>
+          <label>RSI oversold <input type="number" id="paramRsiOversold" min="1" max="49" /></label>
+          <label>RSI overbought <input type="number" id="paramRsiOverbought" min="51" max="99" /></label>
+          <label>Stop-loss % <input type="number" id="paramStopLoss" min="0.5" max="50" step="0.5" /></label>
+          <label>Take-profit % <input type="number" id="paramTakeProfit" min="0.5" max="100" step="0.5" /></label>
+          <label>Position size % of cash <input type="number" id="paramAllocation" min="1" max="100" /></label>
+          <label>Re-entry cooldown (sec) <input type="number" id="paramCooldown" min="0" max="600" /></label>
+          <label>TWAP slices <input type="number" id="paramTwapSlices" min="2" max="20" /></label>
+          <label>TWAP interval (sec) <input type="number" id="paramTwapInterval" min="1" max="30" /></label>
+        </div>
+        <p class="param-note">Changes apply going forward to every ticker with its Algo switch on — they don't rewrite trades already made.</p>
+      </section>
+    </div>
+    <div class="modal-foot">
+      <button id="paramsResetDefaults" class="btn btn-outline">Reset to defaults</button>
+      <button id="paramsApply" class="btn btn-buy">Apply</button>
+    </div>
+  </div>
+</div>
 
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <script src="app.js"></script>
