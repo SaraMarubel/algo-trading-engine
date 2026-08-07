@@ -21,11 +21,14 @@ const MAX_BACKFILL_SECONDS = (CLOSE_MIN - OPEN_MIN) * 60; // cap backfill at one
 const DEFAULT_PARAMS = {
   smaFast: 9,
   smaSlow: 21,
+  trendFilterPeriod: 50,
   rsiPeriod: 14,
   rsiOversold: 30,
   rsiOverbought: 70,
   stopLossPct: 3,
   takeProfitPct: 5,
+  trailingActivatePct: 2.5,
+  trailingStopPct: 1.5,
   allocationPct: 20,
   cooldownSec: 25,
   twapSlices: 8,
@@ -41,6 +44,18 @@ function loadParams() {
 }
 let params = loadParams();
 let mode = localStorage.getItem("mtt_mode") || "demo"; // "demo" | "live"
+
+function loadAlgoEnabledSet() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("mtt_algoEnabled"));
+    if (Array.isArray(saved)) return new Set(saved);
+  } catch (e) { /* ignore malformed storage */ }
+  return new Set(["MSFT"]);
+}
+const algoEnabledSet = loadAlgoEnabledSet();
+function saveAlgoEnabledSet() {
+  localStorage.setItem("mtt_algoEnabled", JSON.stringify([...algoEnabledSet]));
+}
 
 const TICKERS = [
   { symbol: "MSFT", name: "Microsoft Corp.", price: 468.35, volatility: 0.0022 },
@@ -59,8 +74,8 @@ TICKERS.forEach(t => {
   t.closes = [];
   t.prevSmaFast = null;
   t.prevSmaSlow = null;
-  t.position = { open: false, entryPrice: 0, qty: 0 };
-  t.algoEnabled = t.symbol === "MSFT";
+  t.position = { open: false, entryPrice: 0, qty: 0, peak: 0 };
+  t.algoEnabled = algoEnabledSet.has(t.symbol);
   t.replayed = false;
   t.lastExitAt = null;
   t.markers = [];
@@ -272,6 +287,7 @@ function advanceTicker(t, virtualTime, liveGate) {
 function evaluateStrategy(t, closesSlice, closePrice, atTime, candleTime, liveGate) {
   const fast = sma(closesSlice, params.smaFast);
   const slow = sma(closesSlice, params.smaSlow);
+  const trendSma = sma(closesSlice, params.trendFilterPeriod);
   const currentRsi = rsi(closesSlice, params.rsiPeriod);
 
   const prevFast = t.prevSmaFast, prevSlow = t.prevSmaSlow;
@@ -290,16 +306,26 @@ function evaluateStrategy(t, closesSlice, closePrice, atTime, candleTime, liveGa
   const pos = t.position;
 
   if (pos.open) {
+    pos.peak = Math.max(pos.peak, closePrice);
     const changeFromEntry = (closePrice - pos.entryPrice) / pos.entryPrice;
+    const changeFromPeak = (closePrice - pos.peak) / pos.peak;
+    const trailingActive = changeFromEntry >= params.trailingActivatePct / 100;
+
     if (changeFromEntry <= -params.stopLossPct / 100) {
       autoSell(t, closePrice, `Stop-loss (${fmtPct(changeFromEntry * 100)})`,
-        `Price fell ${Math.abs(changeFromEntry * 100).toFixed(2)}% from the ${fmtMoney(pos.entryPrice)} entry, past the ${params.stopLossPct}% stop-loss threshold — the algorithm exits automatically to cap downside rather than hope for a recovery.`,
+        `Price fell ${Math.abs(changeFromEntry * 100).toFixed(2)}% from the ${fmtMoney(pos.entryPrice)} entry, past the ${params.stopLossPct}% hard stop-loss — the algorithm exits automatically to cap downside rather than hope for a recovery.`,
+        atTime, candleTime);
+      return;
+    }
+    if (trailingActive && changeFromPeak <= -params.trailingStopPct / 100) {
+      autoSell(t, closePrice, `Trailing stop (${fmtPct(changeFromEntry * 100)} on trade)`,
+        `The position moved ${params.trailingActivatePct}%+ into profit (peak of ${fmtMoney(pos.peak)}), activating a trailing stop; price has now pulled back ${Math.abs(changeFromPeak * 100).toFixed(2)}% from that peak, past the ${params.trailingStopPct}% trail — the algorithm locks in the gain rather than let it fully round-trip.`,
         atTime, candleTime);
       return;
     }
     if (changeFromEntry >= params.takeProfitPct / 100) {
       autoSell(t, closePrice, `Take-profit (${fmtPct(changeFromEntry * 100)})`,
-        `Price rose ${(changeFromEntry * 100).toFixed(2)}% from the ${fmtMoney(pos.entryPrice)} entry, past the ${params.takeProfitPct}% take-profit target — the algorithm locks in the gain rather than risk giving it back.`,
+        `Price rose ${(changeFromEntry * 100).toFixed(2)}% from the ${fmtMoney(pos.entryPrice)} entry, past the ${params.takeProfitPct}% take-profit ceiling — the algorithm locks in the gain rather than risk giving it back.`,
         atTime, candleTime);
       return;
     }
@@ -317,9 +343,10 @@ function evaluateStrategy(t, closesSlice, closePrice, atTime, candleTime, liveGa
     }
   } else {
     const cooledDown = !t.lastExitAt || (atTime - t.lastExitAt) / 1000 >= params.cooldownSec;
-    if (bullishCross && cooledDown && (currentRsi === null || currentRsi < params.rsiOverbought)) {
+    const trendOk = trendSma === null || closePrice > trendSma;
+    if (bullishCross && cooledDown && trendOk && (currentRsi === null || currentRsi < params.rsiOverbought)) {
       autoBuy(t, closePrice, `SMA(${params.smaFast}) crossed above SMA(${params.smaSlow})`,
-        `The ${params.smaFast}-period moving average rose above the ${params.smaSlow}-period average (a "golden cross") — short-term momentum has turned bullish relative to the intermediate trend, and RSI wasn't already overbought, so the algorithm opens a long position sized at ${params.allocationPct}% of available cash.`,
+        `The ${params.smaFast}-period moving average rose above the ${params.smaSlow}-period average (a "golden cross") while price traded above its ${params.trendFilterPeriod}-period trend average — short-term momentum has turned bullish in the direction of the prevailing trend, and RSI wasn't already overbought, so the algorithm opens a long position sized at ${params.allocationPct}% of available cash.`,
         atTime, candleTime);
     }
   }
@@ -333,17 +360,17 @@ function autoBuy(t, price, reason, detail, atTime, candleTime) {
   state.cash -= cost;
   state.holdings[t.symbol] += qty;
   state.avgCost[t.symbol] = price;
-  t.position = { open: true, entryPrice: price, qty };
+  t.position = { open: true, entryPrice: price, qty, peak: price };
   logTrade(t.symbol, "BUY", qty, price, reason, true, detail, atTime);
   addMarker(t, candleTime, "belowBar", "arrowUp", "#26d67f", "BUY");
 }
 
 function autoSell(t, price, reason, detail, atTime, candleTime) {
   const qty = state.holdings[t.symbol];
-  if (qty < 1) { t.position = { open: false, entryPrice: 0, qty: 0 }; return; }
+  if (qty < 1) { t.position = { open: false, entryPrice: 0, qty: 0, peak: 0 }; return; }
   state.cash += qty * price;
   state.holdings[t.symbol] = 0;
-  t.position = { open: false, entryPrice: 0, qty: 0 };
+  t.position = { open: false, entryPrice: 0, qty: 0, peak: 0 };
   t.lastExitAt = atTime;
   logTrade(t.symbol, "SELL", qty, price, reason, true, detail, atTime);
   addMarker(t, candleTime, "aboveBar", "arrowDown", "#ff4d5e", "SELL");
@@ -360,7 +387,7 @@ function addMarker(t, time, position, shape, color, text) {
 function replayStrategyOnHistory(t) {
   t.prevSmaFast = null;
   t.prevSmaSlow = null;
-  t.position = { open: false, entryPrice: 0, qty: 0 };
+  t.position = { open: false, entryPrice: 0, qty: 0, peak: 0 };
   t.markers = [];
   for (let i = 0; i < t.candles.length; i++) {
     const slice = t.closes.slice(0, i + 1);
@@ -420,7 +447,7 @@ function twapDump(t, pct) {
       const price = t.price;
       state.cash += qty * price;
       state.holdings[t.symbol] -= qty;
-      if (state.holdings[t.symbol] === 0) t.position = { open: false, entryPrice: 0, qty: 0 };
+      if (state.holdings[t.symbol] === 0) t.position = { open: false, entryPrice: 0, qty: 0, peak: 0 };
       logTrade(t.symbol, "SELL", qty, price, `TWAP dump — slice ${i}/${slices}`, false,
         `Part of a TWAP (Time-Weighted Average Price) sell of ${totalQty} shares, split into ${slices} slices about ${params.twapInterval}s apart so the order doesn't hit the book all at once and move the price against you — the classic technique real desks use to unwind a large position quietly.`);
     }
@@ -445,7 +472,7 @@ function twapBuy(t, dollarAmount) {
       const prevCost = state.avgCost[t.symbol] * prevQty;
       state.holdings[t.symbol] += qty;
       state.avgCost[t.symbol] = (prevCost + cost) / state.holdings[t.symbol];
-      t.position = { open: true, entryPrice: state.avgCost[t.symbol], qty: state.holdings[t.symbol] };
+      t.position = { open: true, entryPrice: state.avgCost[t.symbol], qty: state.holdings[t.symbol], peak: Math.max(price, t.position.peak || 0) };
       logTrade(t.symbol, "BUY", qty, price, `TWAP accumulate — slice ${i}/${slices}`, false,
         `Part of a TWAP buy deploying ${fmtMoney(dollarAmount)}, split into ${slices} slices about ${params.twapInterval}s apart so the order doesn't chase the price up against itself while filling.`);
     }
@@ -470,13 +497,13 @@ function manualTrade(symbol, side, qty) {
     const prevCost = state.avgCost[symbol] * prevQty;
     state.holdings[symbol] += qty;
     state.avgCost[symbol] = (prevCost + cost) / state.holdings[symbol];
-    t.position = { open: true, entryPrice: state.avgCost[symbol], qty: state.holdings[symbol] };
+    t.position = { open: true, entryPrice: state.avgCost[symbol], qty: state.holdings[symbol], peak: Math.max(price, t.position.peak || 0) };
   } else {
     const sellQty = Math.min(qty, state.holdings[symbol]);
     if (sellQty < 1) return;
     state.cash += sellQty * price;
     state.holdings[symbol] -= sellQty;
-    if (state.holdings[symbol] === 0) t.position = { open: false, entryPrice: 0, qty: 0 };
+    if (state.holdings[symbol] === 0) t.position = { open: false, entryPrice: 0, qty: 0, peak: 0 };
     qty = sellQty;
   }
   logTrade(symbol, side, qty, price, "Manual order", false, "You placed this order directly — it wasn't generated by the algorithm.");
@@ -516,6 +543,59 @@ function renderBlotter() {
       <td>${tr.reason}</td>
     </tr>
   `).join("");
+}
+
+// ---------------------------------------------------------------------
+// Performance summary — pairs AUTO buy/sell fills into round-trips and
+// summarizes today's algo performance. Recomputed on a timer (every 3
+// hours) rather than on every trade, so it reads as a periodic report
+// rather than a constantly-shifting live number.
+// ---------------------------------------------------------------------
+function computePerformanceSummary() {
+  const autoTrades = [...state.trades].filter(t => t.auto).reverse(); // oldest first
+  const openLots = {};
+  const closed = [];
+  autoTrades.forEach(tr => {
+    if (tr.side === "BUY") {
+      openLots[tr.symbol] = { price: tr.price, qty: tr.qty };
+    } else if (openLots[tr.symbol]) {
+      const entry = openLots[tr.symbol];
+      const pnl = (tr.price - entry.price) * tr.qty;
+      const pnlPct = ((tr.price - entry.price) / entry.price) * 100;
+      closed.push({ symbol: tr.symbol, pnl, pnlPct });
+      delete openLots[tr.symbol];
+    }
+  });
+  const wins = closed.filter(c => c.pnl > 0);
+  const losses = closed.filter(c => c.pnl <= 0);
+  const best = closed.reduce((b, c) => (!b || c.pnl > b.pnl ? c : b), null);
+  const worst = closed.reduce((w, c) => (!w || c.pnl < w.pnl ? c : w), null);
+  return {
+    count: closed.length,
+    winRate: closed.length ? (wins.length / closed.length) * 100 : null,
+    totalPnl: closed.reduce((s, c) => s + c.pnl, 0),
+    avgWin: wins.length ? wins.reduce((s, c) => s + c.pnl, 0) / wins.length : 0,
+    avgLoss: losses.length ? losses.reduce((s, c) => s + c.pnl, 0) / losses.length : 0,
+    best, worst,
+    openPositions: TICKERS.filter(t => t.position.open).length,
+  };
+}
+
+function renderPerformanceSummary() {
+  const s = computePerformanceSummary();
+  const pnlEl = document.getElementById("perfPnl");
+  pnlEl.textContent = fmtMoney(s.totalPnl);
+  pnlEl.className = "perf-value " + (s.totalPnl >= 0 ? "positive" : "negative");
+
+  document.getElementById("perfWinRate").textContent = s.winRate === null ? "—" : s.winRate.toFixed(0) + "%";
+  document.getElementById("perfCount").textContent = s.count;
+  document.getElementById("perfOpen").textContent = s.openPositions;
+  document.getElementById("perfAvg").textContent =
+    s.count ? `${fmtMoney(s.avgWin)} / ${fmtMoney(s.avgLoss)}` : "—";
+  document.getElementById("perfBestWorst").textContent = s.best
+    ? `${s.best.symbol} ${fmtPct(s.best.pnlPct)} / ${s.worst.symbol} ${fmtPct(s.worst.pnlPct)}`
+    : "—";
+  document.getElementById("perfUpdated").textContent = "Updated " + new Date().toLocaleTimeString();
 }
 
 // ---------------------------------------------------------------------
@@ -612,6 +692,8 @@ function buildTickerGrid() {
 function toggleAlgoForTicker(symbol) {
   const t = TICKERS.find(x => x.symbol === symbol);
   t.algoEnabled = !t.algoEnabled;
+  if (t.algoEnabled) algoEnabledSet.add(symbol); else algoEnabledSet.delete(symbol);
+  saveAlgoEnabledSet();
   if (t.algoEnabled && !t.replayed) {
     replayStrategyOnHistory(t);
     t.replayed = true;
@@ -738,11 +820,14 @@ const settingsModal = document.getElementById("settingsModal");
 function populateParamForm() {
   document.getElementById("paramSmaFast").value = params.smaFast;
   document.getElementById("paramSmaSlow").value = params.smaSlow;
+  document.getElementById("paramTrendFilter").value = params.trendFilterPeriod;
   document.getElementById("paramRsiPeriod").value = params.rsiPeriod;
   document.getElementById("paramRsiOversold").value = params.rsiOversold;
   document.getElementById("paramRsiOverbought").value = params.rsiOverbought;
   document.getElementById("paramStopLoss").value = params.stopLossPct;
   document.getElementById("paramTakeProfit").value = params.takeProfitPct;
+  document.getElementById("paramTrailingActivate").value = params.trailingActivatePct;
+  document.getElementById("paramTrailingStop").value = params.trailingStopPct;
   document.getElementById("paramAllocation").value = params.allocationPct;
   document.getElementById("paramCooldown").value = params.cooldownSec;
   document.getElementById("paramTwapSlices").value = params.twapSlices;
@@ -775,11 +860,14 @@ document.getElementById("paramsApply").addEventListener("click", () => {
   params = {
     smaFast: clampInt("paramSmaFast", 2, 50, DEFAULT_PARAMS.smaFast),
     smaSlow: clampInt("paramSmaSlow", 3, 200, DEFAULT_PARAMS.smaSlow),
+    trendFilterPeriod: clampInt("paramTrendFilter", 5, 300, DEFAULT_PARAMS.trendFilterPeriod),
     rsiPeriod: clampInt("paramRsiPeriod", 2, 50, DEFAULT_PARAMS.rsiPeriod),
     rsiOversold: clampInt("paramRsiOversold", 1, 49, DEFAULT_PARAMS.rsiOversold),
     rsiOverbought: clampInt("paramRsiOverbought", 51, 99, DEFAULT_PARAMS.rsiOverbought),
     stopLossPct: clampFloat("paramStopLoss", 0.5, 50, DEFAULT_PARAMS.stopLossPct),
     takeProfitPct: clampFloat("paramTakeProfit", 0.5, 100, DEFAULT_PARAMS.takeProfitPct),
+    trailingActivatePct: clampFloat("paramTrailingActivate", 0.5, 50, DEFAULT_PARAMS.trailingActivatePct),
+    trailingStopPct: clampFloat("paramTrailingStop", 0.5, 50, DEFAULT_PARAMS.trailingStopPct),
     allocationPct: clampInt("paramAllocation", 1, 100, DEFAULT_PARAMS.allocationPct),
     cooldownSec: clampInt("paramCooldown", 0, 600, DEFAULT_PARAMS.cooldownSec),
     twapSlices: clampInt("paramTwapSlices", 2, 20, DEFAULT_PARAMS.twapSlices),
@@ -796,11 +884,14 @@ document.getElementById("paramsResetDefaults").addEventListener("click", () => {
   const defaults = { ...DEFAULT_PARAMS };
   document.getElementById("paramSmaFast").value = defaults.smaFast;
   document.getElementById("paramSmaSlow").value = defaults.smaSlow;
+  document.getElementById("paramTrendFilter").value = defaults.trendFilterPeriod;
   document.getElementById("paramRsiPeriod").value = defaults.rsiPeriod;
   document.getElementById("paramRsiOversold").value = defaults.rsiOversold;
   document.getElementById("paramRsiOverbought").value = defaults.rsiOverbought;
   document.getElementById("paramStopLoss").value = defaults.stopLossPct;
   document.getElementById("paramTakeProfit").value = defaults.takeProfitPct;
+  document.getElementById("paramTrailingActivate").value = defaults.trailingActivatePct;
+  document.getElementById("paramTrailingStop").value = defaults.trailingStopPct;
   document.getElementById("paramAllocation").value = defaults.allocationPct;
   document.getElementById("paramCooldown").value = defaults.cooldownSec;
   document.getElementById("paramTwapSlices").value = defaults.twapSlices;
@@ -850,9 +941,12 @@ document.getElementById("resetAccount").addEventListener("click", () => {
   location.reload();
 });
 
+document.getElementById("perfRefresh").addEventListener("click", renderPerformanceSummary);
+
 // ---------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------
+const PERF_REFRESH_MS = 3 * 60 * 60 * 1000; // performance panel recomputes every 3 hours
 document.getElementById("modeToggle").textContent = "Mode: " + (mode === "demo" ? "Demo" : "Live NYSE Hours");
 refreshLegend();
 buildTickerGrid();
@@ -862,5 +956,7 @@ renderBlotter();
 renderHeader();
 updateTickerGrid();
 updateMarketClock();
+renderPerformanceSummary();
+setInterval(renderPerformanceSummary, PERF_REFRESH_MS);
 setInterval(tick, TICK_MS);
 tick();

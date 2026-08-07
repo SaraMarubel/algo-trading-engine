@@ -3,7 +3,10 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>MSFT Algo Trader — Paper Trading Terminal</title>
+<title>Quant Momentum Engine — Systematic Trading Terminal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -11,8 +14,8 @@
 <header class="topbar">
   <div class="brand">
     <span class="brand-dot"></span>
-    <span class="brand-name">MSFT Algo Trader</span>
-    <span class="brand-tag">Paper Trading Terminal</span>
+    <span class="brand-name">Quant Momentum Engine</span>
+    <span class="brand-tag">Systematic Trading Terminal</span>
   </div>
 
   <div class="account-summary" id="accountSummary">
@@ -100,6 +103,40 @@
     <div class="ticker-grid" id="tickerGrid"></div>
   </section>
 
+  <section class="performance-panel">
+    <div class="panel-head">
+      <div class="panel-title-plain">Today's Performance</div>
+      <span class="panel-hint" id="perfUpdated">—</span>
+    </div>
+    <div class="perf-grid">
+      <div class="perf-stat">
+        <span class="perf-label">Realized P&amp;L</span>
+        <span class="perf-value" id="perfPnl">$0.00</span>
+      </div>
+      <div class="perf-stat">
+        <span class="perf-label">Win rate</span>
+        <span class="perf-value" id="perfWinRate">—</span>
+      </div>
+      <div class="perf-stat">
+        <span class="perf-label">Round-trips</span>
+        <span class="perf-value" id="perfCount">0</span>
+      </div>
+      <div class="perf-stat">
+        <span class="perf-label">Open positions</span>
+        <span class="perf-value" id="perfOpen">0</span>
+      </div>
+      <div class="perf-stat">
+        <span class="perf-label">Avg win / avg loss</span>
+        <span class="perf-value small" id="perfAvg">—</span>
+      </div>
+      <div class="perf-stat">
+        <span class="perf-label">Best / worst trade</span>
+        <span class="perf-value small" id="perfBestWorst">—</span>
+      </div>
+    </div>
+    <button id="perfRefresh" class="btn btn-outline btn-sm perf-refresh">Refresh now</button>
+  </section>
+
   <section class="blotter-panel">
     <div class="panel-head">
       <div class="panel-title-plain">Trade Blotter</div>
@@ -142,11 +179,12 @@
     <div class="modal-body">
       <section class="modal-section">
         <h3>How the algorithm decides</h3>
-        <p>This trader combines three widely-used technical-analysis building blocks:</p>
+        <p>This trader combines several widely-used technical-analysis building blocks:</p>
         <ul>
           <li><b>Moving average crossover.</b> When the fast SMA rises above the slow SMA (a "golden cross"), it's a standard momentum signal that short-term price action has turned bullish relative to the intermediate trend; the reverse ("death cross") signals bearish momentum. A 9/21 pairing is a faster variant of the classic 50/200-day golden/death cross used for longer-term signals.</li>
+          <li><b>Trend filter.</b> Entries are only taken while price trades above a longer-period SMA (50 by default) — a standard trend-following overlay that avoids taking long signals against the prevailing direction, reducing whipsaw losses in a broader downtrend.</li>
           <li><b>RSI filter (Wilder, 1978).</b> The Relative Strength Index measures the speed and magnitude of recent price moves over a lookback period (14 by default). Readings above 70 are conventionally "overbought," below 30 "oversold." Used here to avoid buying into an already-extended move, and to help trigger profit-taking.</li>
-          <li><b>Fixed-fractional position sizing with a stop-loss / take-profit bracket.</b> Each entry risks a fixed % of available cash (scales with account size rather than a flat share count), and every position carries a symmetric-ish risk bracket that exits automatically if price moves against or in favor of the trade by a set %.</li>
+          <li><b>Fixed-fractional position sizing with layered risk controls.</b> Each entry risks a fixed % of available cash (scales with account size rather than a flat share count). Positions carry a hard stop-loss for catastrophic risk control, a <b>trailing stop</b> that activates once a trade is meaningfully in profit and ratchets up with the price to lock in gains, and a take-profit ceiling.</li>
           <li><b>Re-entry cooldown.</b> After an exit, the algorithm won't open a new position in the same ticker for a set number of seconds — a simple form of the hysteresis real systematic strategies use to avoid "overtrading" (repeatedly flipping a position on noise and paying the spread/slippage each time).</li>
         </ul>
         <p>Large manual orders use a separate concept — <b>TWAP execution</b> — which slices an order over time instead of routing it all at once, to reduce market impact. See the ⓘ next to the Dump/Accumulate buttons.</p>
@@ -157,11 +195,14 @@
         <div class="param-grid">
           <label>Fast SMA period <input type="number" id="paramSmaFast" min="2" max="50" /></label>
           <label>Slow SMA period <input type="number" id="paramSmaSlow" min="3" max="200" /></label>
+          <label>Trend filter SMA period <input type="number" id="paramTrendFilter" min="5" max="300" /></label>
           <label>RSI period <input type="number" id="paramRsiPeriod" min="2" max="50" /></label>
           <label>RSI oversold <input type="number" id="paramRsiOversold" min="1" max="49" /></label>
           <label>RSI overbought <input type="number" id="paramRsiOverbought" min="51" max="99" /></label>
           <label>Stop-loss % <input type="number" id="paramStopLoss" min="0.5" max="50" step="0.5" /></label>
           <label>Take-profit % <input type="number" id="paramTakeProfit" min="0.5" max="100" step="0.5" /></label>
+          <label>Trailing stop activates at % <input type="number" id="paramTrailingActivate" min="0.5" max="50" step="0.5" /></label>
+          <label>Trailing stop distance % <input type="number" id="paramTrailingStop" min="0.5" max="50" step="0.5" /></label>
           <label>Position size % of cash <input type="number" id="paramAllocation" min="1" max="100" /></label>
           <label>Re-entry cooldown (sec) <input type="number" id="paramCooldown" min="0" max="600" /></label>
           <label>TWAP slices <input type="number" id="paramTwapSlices" min="2" max="20" /></label>
