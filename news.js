@@ -15,6 +15,18 @@
   const MAX_SHOWN = 14;
   const BACKOFF_MS = 60 * 1000;        // pause after a rate-limit response
 
+  // Finnhub tags broad market stories (many from Yahoo) with every ticker they
+  // loosely touch, so a headline only counts for a ticker if it actually names
+  // the company or one of its products.
+  const RELEVANCE = {
+    MSFT: /\b(microsoft|msft|azure|copilot)\b/i,
+    AAPL: /\b(apple|aapl|iphone)\b/i,
+    GOOGL: /\b(alphabet|google|googl|waymo|youtube)\b/i,
+    AMZN: /\b(amazon|amzn|aws)\b/i,
+    NVDA: /\b(nvidia|nvda)\b/i,
+    META: /\b(meta|facebook|instagram|whatsapp)\b/i,
+  };
+
   const cache = {};                    // symbol -> { fetchedAt, articles }
   const inflight = new Set();
   let blockedUntil = 0;
@@ -73,6 +85,7 @@
         const data = await res.json();
         const articles = (Array.isArray(data) ? data : [])
           .filter(a => a && a.headline && a.datetime)
+          .filter(a => !RELEVANCE[symbol] || RELEVANCE[symbol].test(a.headline))
           .sort((a, b) => b.datetime - a.datetime)
           .slice(0, PER_SYMBOL)
           .map(a => ({
