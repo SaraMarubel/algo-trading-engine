@@ -162,10 +162,22 @@
     </div>
   </section>
 
+  <section class="news-panel">
+    <div class="panel-head">
+      <div class="panel-title-plain">Live News</div>
+      <div class="news-head-right">
+        <span class="news-chips" id="newsChips"></span>
+        <span class="news-status" id="newsStatus">Not connected</span>
+      </div>
+    </div>
+    <div class="news-list" id="newsList"></div>
+    <p class="news-note">Real headlines for the tickers you hold or have the Algo running on. Prices in this app are simulated, so these headlines don't move them.</p>
+  </section>
+
 </main>
 
 <footer class="footer">
-  Simulated prices &amp; paper trades only. No real market data, brokerage, or funds are involved. NYSE clock reflects real time; trading activity is simulated.
+  Simulated prices &amp; paper trades only. No real market data, brokerage, or funds are involved. NYSE clock reflects real time; trading activity is simulated. News headlines are real, supplied by Finnhub.
 </footer>
 
 <div class="tooltip" id="hoverTooltip"></div>
@@ -219,6 +231,8 @@
 </div>
 
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<script src="config.js"></script>
 <script src="app.js"></script>
+<script src="news.js"></script>
 </body>
 </html>

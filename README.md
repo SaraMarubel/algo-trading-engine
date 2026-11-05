@@ -56,6 +56,23 @@ tool or investment advice.
   hover any row for a plain-language explanation of why the algorithm
   made that specific decision.
 
+- **Live news for what you hold:** a bottom panel pulls real headlines from
+  Finnhub's company-news endpoint for every ticker you hold shares in or
+  have the Algo switched on for. Prices stay simulated; only the headlines
+  are real.
+
+## Live news setup (2 minutes)
+
+1. Create a free account at [finnhub.io/register](https://finnhub.io/register)
+   and copy your API key from the dashboard.
+2. Paste it into `config.js` as `finnhubKey: "your-key"`.
+3. Reload the page. The Live News panel switches from "Not connected" to
+   "Live" and fills with headlines.
+
+The key is visible in the published site's source, so use the free
+read-only key and nothing sensitive. Each ticker is fetched at most once
+every 5 minutes, well inside Finnhub's free rate limit.
+
 ## Model & simplifications
 
 - Prices are a client-side random walk with mild mean reversion, not a
